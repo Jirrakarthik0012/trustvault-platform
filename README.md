@@ -76,7 +76,7 @@ TrustVault is a multi-tenant document-sharing application built with Next.js 16 
 
 ## Production deployment checklist
 
-- **Free-tier operation:** The app can run without a malware scanner, but production document uploads are intentionally disabled and the documents page tells managers why. The upload-token API rejects requests before creating a Blob upload token. Existing documents remain viewable and shareable. Do not send confidential files to an unrelated public scanning API as a substitute.
+- **Free-tier operation:** The app can run without a malware scanner, but production document uploads are intentionally disabled and the documents page tells managers why. The upload-token API rejects requests before creating a Blob upload token. Existing documents remain viewable and shareable. Do not send confidential files to an unrelated public scanning API as a substitute. The included ClamAV Blueprint uses Render's free web-service plan to avoid paid provisioning. Render documents free web services as unsuitable for production: they may sleep when idle, restart, lose local files, and be suspended at free-usage limits. ClamAV may also exceed the free instance's memory. Do not enable sensitive document uploads on this service unless it passes the scanner, health, reliability, and resource checks required by your threat model.
 - **Framework security:** Next.js is pinned to 16.4.3. Run `npm audit` before deployment and keep the framework on a supported patched release.
 - `npm audit --omit=dev` reports no production dependency vulnerabilities. Tailwind 4 is configured with the `@tailwindcss/postcss` plugin and CSS-first theme tokens.
 - Use HTTPS and secure production values for both secrets. Do not reuse the same secret for sessions and viewer links.
@@ -92,7 +92,7 @@ TrustVault is a multi-tenant document-sharing application built with Next.js 16 
 
 ## Vercel deployment preparation
 
-The app is configured for Vercel. Within provider free-tier limits, it can run with the linked Vercel project, managed PostgreSQL database, private Blob storage, and Upstash Redis while uploads remain disabled. Enable uploads only after a trusted, adequately resourced ClamAV HTTP bridge is reachable and configured. Render's free web services spin down when idle and are documented as unsuitable for production; the included ClamAV Blueprint uses a paid plan.
+The app is configured for Vercel. Within provider free-tier limits, it can run with the linked Vercel project, managed PostgreSQL database, private Blob storage, and Upstash Redis while uploads remain disabled. A free Render ClamAV service can be tested without adding a payment method, but it may sleep, restart, lose scanner database updates, or fail from memory pressure; Render does not recommend its free instances for production. Keep uploads disabled unless the scanner meets your security and availability requirements.
 
 1. Install or run the Vercel CLI and link this folder to the intended project:
 
@@ -109,7 +109,7 @@ The app is configured for Vercel. Within provider free-tier limits, it can run w
    npm run db:deploy
    ```
 
-4. Create the Upstash Redis database. To host the included ClamAV bridge on Render, create a Blueprint from this repository's `render.yaml`; Render builds `clamav-bridge/Dockerfile`, downloads the virus database at startup, and exposes the bridge over HTTPS. Generate a unique token (for example, `openssl rand -hex 32`) and enter it as `CLAMAV_SCAN_TOKEN` in Render's service settings. Set `CLAMAV_SCAN_URL` to `https://<your-render-service>.onrender.com/scan` and set the same token as `CLAMAV_SCAN_TOKEN` in Vercel's encrypted Production environment. The bridge accepts only bearer-authenticated raw `application/octet-stream` bodies up to 10 MB. Confirm Render's `/healthz` check is healthy before enabling uploads. The Render `standard` plan may incur charges; review current pricing before creating the service.
+4. Create the Upstash Redis database. The included `render.yaml` uses Render's free web-service plan; it has cold starts, ephemeral storage, and resource limits and is not a production reliability guarantee. Render builds `clamav-bridge/Dockerfile`, downloads the virus database at startup, and exposes the bridge over HTTPS. Generate a unique token (for example, `openssl rand -hex 32`) and enter it as `CLAMAV_SCAN_TOKEN` in Render's service settings. Set `CLAMAV_SCAN_URL` to `https://<your-render-service>.onrender.com/scan` and set the same token as `CLAMAV_SCAN_TOKEN` in Vercel's encrypted Production environment only after verifying the scanner works and is acceptable for your threat model. The bridge accepts only bearer-authenticated raw `application/octet-stream` bodies up to 10 MB. Confirm Render's `/healthz` check and test scans before enabling uploads. No payment method is required for the free plan; never upgrade the service without reviewing costs.
 5. Verify the Production variables and migration state, then deploy:
 
    ```sh

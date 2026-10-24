@@ -2,7 +2,7 @@ services:
   - type: web
     name: trustvault-clamav-bridge
     runtime: docker
-    plan: standard
+    plan: free
     region: singapore
     dockerfilePath: ./clamav-bridge/Dockerfile
     dockerContext: ./clamav-bridge
