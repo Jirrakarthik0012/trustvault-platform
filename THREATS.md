@@ -1,0 +1,42 @@
+# TrustVault threat model
+
+This document records the important document-sharing threats in the initial implementation and the corresponding controls. It is an implementation guide, not a substitute for a deployment-specific security assessment.
+
+## Trust boundaries
+
+- The browser is untrusted. Form values, file names, MIME type declarations, recipient IDs, expiration dates, document IDs, and viewer tokens are validated on the server.
+- The authenticated user's session identifies a principal. `getCurrentUser` also reads the current organization and role from PostgreSQL, so stale role claims do not continue granting a role after a role change.
+- PostgreSQL is the authorization metadata source. In local development, the filesystem is private content storage and is never exposed as a static path. Vercel uses a private Blob store; client uploads receive a short-lived, server-issued token only after live authentication, role, tenant-path, and rate-limit checks.
+- A trusted reverse proxy must replace forwarded IP headers. The application records the observed address; it cannot prove that a proxy-supplied IP is genuine.
+
+## Risks and code mitigations
+
+| Threat | Mitigation in code | Relevant implementation |
+|---|---|---|
+| IDOR / BOLA: a user changes a document ID and reads another user's file | Viewer metadata lookup includes both `id` and the session's `organizationId`, and separately requires owner, manager/admin, or an active user-specific grant. The API responds with the same not-found result for absent and unauthorized records. | `src/app/api/documents/[id]/view/route.ts`, `src/actions/documents.ts` |
+| Tenant-isolation breach through a guessed user, document, or share ID | Every member, document, and share lookup is constrained to the caller's organization. A grant recipient is checked against the document owner's tenant before creation. | `src/actions/shares.ts`, `src/actions/members.ts`, `src/app/(workspace)/share/page.tsx` |
+| Privilege escalation by changing a client role field | Mutations do not accept a caller role; role-change and member-provisioning actions require a live `ADMIN` role. The database membership is re-read for each server guard. The last administrator cannot be demoted. | `src/lib/auth-guard.ts`, `src/actions/members.ts` |
+| Cross-tenant login ambiguity | Credential authentication requires an organization slug and matches email within that organization. Passwords are bcrypt-hashed. | `src/lib/auth.ts`, `src/app/login/page.tsx`, `src/actions/auth.ts` |
+| Stolen or replayed viewer URL | The HMAC token is bound to a document and user, expires after five minutes, and is verified with constant-time signature comparison. The endpoint also requires the matching signed-in user and re-queries the active permission before reading content. Responses are private and non-cacheable. | `src/lib/viewer-token.ts`, `src/app/api/documents/[id]/view/route.ts` |
+| Revocation bypass using an already-issued viewer link | Revocation updates the grant in PostgreSQL. No grant is embedded as authoritative state in the signed token; the next viewer request re-checks `revokedAt` and expiry. | `src/actions/shares.ts`, `src/app/api/documents/[id]/view/route.ts` |
+| Malicious upload, content-type spoofing, or path traversal | Upload size and MIME allowlist are enforced server-side; common file signatures are verified; filenames are bounded and rejected if they contain control characters. Storage uses a random UUID key, private directory permissions, exclusive create, and no user-controlled path. | `src/lib/storage.ts`, `src/actions/documents.ts` |
+| Upload bypasses Vercel request-size limits or reaches storage before authorization | Vercel uploads go directly to a private Blob store using a short-lived client token. Token issuance verifies the signed-in role, organization-scoped random pathname, content-type allowlist, 10 MB cap, and upload rate limit. Finalization fetches the private Blob server-side, validates actual size and file signature, scans the file, and only then creates the database record. | `src/app/api/documents/upload/route.ts`, `src/actions/documents.ts`, `src/components/upload-modal.tsx`, `src/lib/storage.ts` |
+| Malware reaches an available document | Production registration fails closed unless the HTTPS ClamAV bridge accepts a bearer-authenticated raw `application/octet-stream` body and returns an explicit clean result. Malware, scanner errors, malformed results, and timeouts reject and remove the pending Blob. The bridge caps bodies at 10 MB and limits concurrent scans. | `src/lib/malware-scan.ts`, `clamav-bridge/server.mjs`, `src/actions/documents.ts` |
+| Brute-force registration, sign-in, or repeated uploads | Redis-backed Upstash sliding-window limits apply to IPs, normalized email identifiers, and authenticated user IDs. Identifiers are hashed before use as Redis keys. Missing or unavailable Upstash blocks the protected operation in production. | `src/lib/rate-limit.ts`, `src/actions/auth.ts`, `src/lib/auth.ts`, `src/app/api/documents/upload/route.ts` |
+| Stored HTML/script execution | HTML/SVG types are not accepted. The viewer uses `X-Content-Type-Options: nosniff`, a restrictive CSP, a generic inline filename, and only supported PDF/image/plain-text MIME types. | `src/lib/storage.ts`, `src/app/api/documents/[id]/view/route.ts` |
+| Unauthorized share or immediate access to a neighboring tenant | Only the owner or a live `ADMIN`/`MANAGER` can grant/revoke access. The recipient must be a registered user in the same organization. Grants are individual-user scoped, not public links. | `src/actions/shares.ts` |
+| Excessive access duration | Optional expiry timestamps are validated as future dates and checked at every viewer access. | `src/actions/shares.ts`, `src/actions/documents.ts` |
+| Audit tampering through app endpoints | Audit writes are create-only in the service and Prisma model usage; the UI exposes no edit/delete action. Business mutations and their successful audit events are committed in the same database transaction. | `src/lib/audit.ts`, `src/actions/` |
+| Forged client IP in audit records | The app records `X-Real-IP` or the first `X-Forwarded-For` value; deployment must only accept these from a trusted proxy that overwrites inbound values. | `src/lib/audit.ts` |
+
+## Residual risks / deployment requirements
+
+- Keep Next.js and its transitive dependencies on supported patched releases. Run `npm audit` as part of release review.
+- Keep the Tailwind 4 PostCSS plugin and its transitive dependencies patched; run the full dependency audit as part of release review.
+- Vercel client uploads use `BLOB_READ_WRITE_TOKEN` to issue short-lived upload credentials; keep it secret. Private Blob read access remains server-side and the viewer endpoint performs a fresh authorization check.
+- A browser abandoned after a successful direct Blob transfer but before document registration can leave an unreferenced private Blob. Failed client finalization attempts clean it up; production operations should also monitor storage and configure a retention cleanup process.
+- A compromised database owner or application database credential can modify application-level audit records. Use a database role without `UPDATE`/`DELETE` privileges on audit rows, database triggers, or an external WORM audit sink where legal requirements demand stronger immutability.
+- PDF/image parsers and browsers have their own attack surface. Keep runtimes updated and add malware scanning / content-disarm controls for high-risk deployments.
+- Production rate limiting requires the configured Upstash Redis service. Development bypasses the remote limits when credentials are absent. There is no built-in email delivery, self-service password reset, MFA, or enterprise SSO; add these controls before exposing account creation to the public internet.
+- The ClamAV bridge is a separately operated service. Keep its virus database current, protect its bearer token, monitor its health, and review Render plan costs. The bridge rejects unknown/error scan results and limits concurrency; the application's local development mode permits uploads without a scanner so development remains self-contained. Keep the Docker base image and OS packages patched and redeploy regularly.
+- Implement transport security, secure secret management, storage encryption, database backups, operational alerting, and retention controls in the deployment environment.

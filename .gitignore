@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+build/
+coverage/
+.env
+.env.*
+.trustvault-storage/
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+.env*
+!.env.example
