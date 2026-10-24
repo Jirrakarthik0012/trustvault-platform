@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 import { DocumentTable } from "@/components/document-table";
 import { UploadModal } from "@/components/upload-modal";
+import { isMalwareScanningConfigured } from "@/lib/malware-scan";
 import { isVercelBlobStorage } from "@/lib/storage";
 
 export const metadata: Metadata = { title: "Documents" };
@@ -12,6 +13,7 @@ export const maxDuration = 60;
 
 export default async function DocumentsPage() {
   const [documents, user] = await Promise.all([getTenantDocuments(), getCurrentUser()]);
+  const malwareScanningConfigured = isMalwareScanningConfigured();
   const recipients = user
     ? await prisma.user.findMany({
         where: { organizationId: user.organizationId, id: { not: user.id } },
@@ -27,9 +29,15 @@ export default async function DocumentsPage() {
           <UploadModal
             organizationId={user.organizationId}
             useDirectUpload={isVercelBlobStorage()}
+            malwareScanningConfigured={malwareScanningConfigured}
           />
         )}
       </div>
+      {user && user.role !== "VIEWER" && !malwareScanningConfigured && (
+        <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950">
+          Document uploads are disabled until the secure malware-scanning service is configured. Existing documents remain available.
+        </div>
+      )}
       <div className="flex items-start gap-2 rounded-xl border border-brand/15 bg-mint/60 px-4 py-3 text-xs leading-5 text-brand-dark"><ShieldCheck className="mt-0.5 shrink-0" size={15} /><p>Files are stored outside the public web directory. Viewing requires an authenticated, short-lived signed link and a fresh access check.</p></div>
       {user && <DocumentTable documents={documents} recipients={recipients} currentUserId={user.id} currentUserRole={user.role} />}
     </div>

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getRequestIp, writeAudit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth-guard";
+import { isMalwareScanningConfigured } from "@/lib/malware-scan";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isValidBlobPathForOrganization, isVercelBlobStorage } from "@/lib/storage";
 
@@ -43,6 +44,19 @@ export async function POST(request: Request) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     console.error("TrustVault direct uploads require BLOB_READ_WRITE_TOKEN.");
     return NextResponse.json({ error: "Private file storage is not configured." }, { status: 503 });
+  }
+  if (!isMalwareScanningConfigured()) {
+    await writeAudit({
+      organizationId: user.organizationId,
+      userId: user.id,
+      action: "ACCESS_DENIED",
+      status: "FAILURE",
+      details: "Upload blocked because the production malware scanner is not configured."
+    });
+    return NextResponse.json(
+      { error: "Uploads are disabled until the secure malware scanner is configured." },
+      { status: 503 }
+    );
   }
 
   const rateLimit = await checkRateLimit("upload", [user.id, await getRequestIp()]);

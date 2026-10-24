@@ -15,10 +15,12 @@ import { Input } from "@/components/ui/input";
 
 export function UploadModal({
   organizationId,
-  useDirectUpload
+  useDirectUpload,
+  malwareScanningConfigured
 }: {
   organizationId: string;
   useDirectUpload: boolean;
+  malwareScanningConfigured: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -83,7 +85,9 @@ export function UploadModal({
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}><FileUp size={16} /> Upload document</Button>
+      {malwareScanningConfigured && (
+        <Button onClick={() => setOpen(true)}><FileUp size={16} /> Upload document</Button>
+      )}
       {open && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/45 p-4" role="presentation" onMouseDown={(event) => {
           if (event.target === event.currentTarget && !pending) setOpen(false);

@@ -76,6 +76,7 @@ TrustVault is a multi-tenant document-sharing application built with Next.js 16 
 
 ## Production deployment checklist
 
+- **Free-tier operation:** The app can run without a malware scanner, but production document uploads are intentionally disabled and the documents page tells managers why. The upload-token API rejects requests before creating a Blob upload token. Existing documents remain viewable and shareable. Do not send confidential files to an unrelated public scanning API as a substitute.
 - **Framework security:** Next.js is pinned to 16.4.3. Run `npm audit` before deployment and keep the framework on a supported patched release.
 - `npm audit --omit=dev` reports no production dependency vulnerabilities. Tailwind 4 is configured with the `@tailwindcss/postcss` plugin and CSS-first theme tokens.
 - Use HTTPS and secure production values for both secrets. Do not reuse the same secret for sessions and viewer links.
@@ -91,7 +92,7 @@ TrustVault is a multi-tenant document-sharing application built with Next.js 16 
 
 ## Vercel deployment preparation
 
-The app is configured for Vercel, but a live deployment needs a linked Vercel account/project, a managed PostgreSQL database, private Blob storage, Upstash Redis, and a reachable ClamAV HTTP bridge. Do not promote production while any required service is missing; uploads and rate-limited operations intentionally fail closed.
+The app is configured for Vercel. Within provider free-tier limits, it can run with the linked Vercel project, managed PostgreSQL database, private Blob storage, and Upstash Redis while uploads remain disabled. Enable uploads only after a trusted, adequately resourced ClamAV HTTP bridge is reachable and configured. Render's free web services spin down when idle and are documented as unsuitable for production; the included ClamAV Blueprint uses a paid plan.
 
 1. Install or run the Vercel CLI and link this folder to the intended project:
 
